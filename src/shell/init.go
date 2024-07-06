@@ -27,6 +27,9 @@ var bashInit string
 //go:embed scripts/omp.zsh
 var zshInit string
 
+//go:embed scripts/async.zsh
+var zshAsync string
+
 //go:embed scripts/omp.lua
 var cmdInit string
 
@@ -238,7 +241,7 @@ func PrintInit(env runtime.Environment) string {
 	case ZSH:
 		executable = quotePosixStr(executable)
 		configFile = quotePosixStr(configFile)
-		script = zshInit
+		script = zshAsync + zshInit
 	case BASH:
 		executable = quotePosixStr(executable)
 		configFile = quotePosixStr(configFile)

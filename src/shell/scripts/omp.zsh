@@ -43,8 +43,31 @@ function prompt_ohmyposh_preexec() {
   omp_start_time=$(::OMP:: get millis)
 }
 
+async_init
+
+
+eval_prompt_async() {
+  sleep 5
+  printf "%s" "$(::OMP:: print primary "$@")"
+}
+
+# Create a callback function to process results
+completed_callback() {
+  eval "$3"
+  zle .reset-prompt
+}
+
+# Initialize a new worker (with notify option)
+async_start_worker my_worker -n
+# Register callback function for the workers completed jobs
+async_register_callback my_worker completed_callback
+
+
 function prompt_ohmyposh_precmd() {
   omp_last_error=$?
+  # We are going to dispplay a new prompt
+  # Cancel the asynchronous ones still running as they are no longer needed
+  async_flush_jobs my_worker
   local pipeStatus=(${pipestatus[@]})
   omp_stack_count=${#dirstack[@]}
   omp_elapsed=-1
@@ -61,7 +84,9 @@ function prompt_ohmyposh_precmd() {
   export POSH_PROMPT_COUNT=$count
   set_poshcontext
   _set_posh_cursor_position
-  eval "$(::OMP:: print primary --config="$POSH_THEME" --status="$omp_last_error" --pipestatus="${pipeStatus[*]}" --execution-time="$omp_elapsed" --stack-count="$omp_stack_count" --eval --shell=zsh --shell-version="$ZSH_VERSION" --no-status="$no_exit_code")"
+  # Give the worker some tasks to perform
+  async_job my_worker eval_prompt_async --config="$POSH_THEME" --status="$omp_last_error" --pipestatus="${pipeStatus[*]}" --execution-time="$omp_elapsed" --stack-count="$omp_stack_count" --eval --shell=zsh --shell-version="$ZSH_VERSION" --no-status="$no_exit_code"
+  eval "$(::OMP:: print transient --config="$POSH_THEME" --status="$omp_last_error" --pipestatus="${pipeStatus[*]}" --execution-time="$omp_elapsed" --stack-count="$omp_stack_count" --eval --shell=zsh --shell-version="$ZSH_VERSION" --no-status="$no_exit_code")"
   unset omp_start_time
 }
 
