@@ -31,7 +31,7 @@ require (
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/gookit/goutil v0.8.0
 	github.com/hashicorp/hcl/v2 v2.24.0
-	github.com/mattn/go-runewidth v0.0.28
+	github.com/mattn/go-runewidth v0.0.29
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/shirou/gopsutil/v4 v4.26.8
