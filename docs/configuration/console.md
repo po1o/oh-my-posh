@@ -4,8 +4,8 @@
 
 A prompt tuned for a graphical terminal does not survive a text console.
 
-The Linux virtual console (what you get on `Ctrl+Alt+F2`, or on a machine with no
-desktop session) has two hard limits:
+A text console — the Linux virtual console you get on `Ctrl+Alt+F2`, the FreeBSD
+`vt(4)` console, or any machine with no desktop session — has two hard limits:
 
 - **No Nerd Font.** The console font holds a few hundred glyphs. Powerline
   separators and Nerd Font icons render as blanks or rectangles.
@@ -95,14 +95,38 @@ A session counts as a console when:
 
 | Condition | Result |
 | --- | --- |
-| `PROMPTO_CONSOLE=1` | console, whatever `TERM` says |
-| `PROMPTO_CONSOLE=0` | not a console, whatever `TERM` says |
-| `TERM=linux` | console |
+| `PROMPTO_CONSOLE=1` | console, whatever the signals below say |
+| `PROMPTO_CONSOLE=0` | not a console, whatever the signals below say |
+| `TERM` names a console | console |
+| the controlling terminal is a console device | console |
 | anything else | not a console |
 
+The two signals are platform-specific:
+
+| Platform | Console `TERM` | Console devices |
+| --- | --- | --- |
+| Linux | `linux` | `/dev/tty1` upwards |
+| FreeBSD | `cons25`, `cons25w` | `/dev/ttyv0` … `/dev/ttyvf` |
+| other | `linux` | — |
+
+`TERM` alone is not enough. A FreeBSD virtual console gets its terminal type
+from the static `/etc/ttys` shipped with the release, and since FreeBSD 9.0 that
+file assigns `xterm` — the same thing a terminal emulator reports. (`cons25` is
+what releases up to 8.x assigned; it is not a property of the console driver, so
+a modern console reports `xterm` whether it is running `vt(4)`, the default
+since 11.0, or the older `syscons`.)
+
+The device check exists to catch those. It asks the kernel which terminal
+`/dev/tty` currently stands for and compares that device against the console
+devices, so the answer comes from the kernel rather than from a string the
+console chose for itself.
+
+`TERM` is still checked first, because it is the cheaper signal and the only one
+that survives an SSH hop — connecting from a Linux console carries `TERM=linux`
+to the remote host, where no local device would match.
+
 `PROMPTO_CONSOLE` exists so you can force the decision: to preview the console
-config from your normal terminal, or to opt in a serial console or framebuffer
-terminal that reports some other `TERM`.
+config from your normal terminal, or to opt in a session neither signal reaches.
 
 Preview the console config without leaving your terminal emulator:
 
@@ -110,11 +134,30 @@ Preview the console config without leaving your terminal emulator:
 PROMPTO_CONSOLE=1 prompto init zsh --print
 ```
 
+### What Detection Misses
+
+These need `PROMPTO_CONSOLE=1` set in your shell profile, because nothing
+distinguishes them from a graphical terminal:
+
+- **SSH out of a FreeBSD `vt(4)` console.** The remote host sees `TERM=xterm`
+  and a pseudo-terminal. There is no signal left to read.
+- **`tmux` or `screen` running on a console.** `TERM` becomes `screen`, and the
+  shell's terminal is a pseudo-terminal owned by the multiplexer, even though
+  what is on screen is still the console.
+- **A serial console.** Booting with `console=ttyS0` gives a terminal that is
+  neither a virtual console device nor a recognised `TERM` (`vt100`, typically),
+  so neither signal fires. A framebuffer console needs nothing special —
+  `fbcon` *is* the virtual console, so it is detected like any other.
+
 ## Resolution Happens Once, At Init
 
 The choice is made by `prompto init`, which runs inside the shell itself and so
-sees that session's `TERM`. The resolved path is baked into the init script and
-passed back on every later render.
+sees that session's own `TERM` and controlling terminal. The resolved path is
+baked into the init script and passed back on every later render.
+
+Running inside the shell is what makes the device check possible at all. `init`
+opens `/dev/tty` rather than reading one of its own streams, because its stdout
+is the pipe feeding the shell's `eval` and is not the terminal.
 
 That matters when a console session and a desktop terminal session are open at
 the same time: each one carries its own config path, so they can share a daemon

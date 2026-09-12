@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/po1o/prompto/src/log"
@@ -11,10 +12,8 @@ import (
 
 const (
 	// ConsoleEnv forces console detection on ("1") or off ("0"), taking
-	// precedence over TERM.
+	// precedence over every other signal.
 	ConsoleEnv = "PROMPTO_CONSOLE"
-	// consoleTerm is the TERM value reported by the Linux virtual console.
-	consoleTerm = "linux"
 	// consoleMarker is inserted before the extension to name the console
 	// variant of a config, e.g. config.yaml -> config.console.yaml.
 	consoleMarker = ".console"
@@ -24,9 +23,16 @@ const (
 // than a graphical terminal emulator. A console has no Nerd Font glyphs and
 // only the 16 ANSI colors, so it needs a config written for those limits.
 //
-// PROMPTO_CONSOLE overrides TERM so the behavior can be forced either way,
-// both for testing and for consoles reporting an unusual TERM.
-func IsConsole(getenv func(string) string) bool {
+// Two signals are consulted. TERM is the cheap one, and the only one that
+// survives an SSH hop, but it cannot be trusted on its own: /etc/ttys gives
+// FreeBSD's vt(4) console the terminal type "xterm", which is exactly what an
+// emulator reports. onDevice catches those by asking whether the controlling
+// terminal is a console device.
+//
+// PROMPTO_CONSOLE overrides both, so the behavior can be forced either way for
+// testing and for the sessions neither signal can reach: SSH out of a vt(4)
+// console, or a multiplexer running on a console.
+func IsConsole(getenv func(string) string, onDevice func() bool) bool {
 	switch getenv(ConsoleEnv) {
 	case "1":
 		return true
@@ -34,7 +40,11 @@ func IsConsole(getenv func(string) string) bool {
 		return false
 	}
 
-	return getenv("TERM") == consoleTerm
+	if slices.Contains(consoleTerms, getenv("TERM")) {
+		return true
+	}
+
+	return onDevice()
 }
 
 // ConsoleVariant returns the console-specific sibling of configFile by
@@ -57,16 +67,17 @@ func isConsoleVariant(configFile string) bool {
 // DefaultPath when nothing was requested, swapped for its console variant when
 // running on a console and that variant exists on disk.
 //
-// This runs in the shell's own process during `prompto init`, where TERM is
-// the session's, and the result is baked into the init script. Every later
-// render in that session then passes the resolved path back via --config, so
-// console and non-console sessions can share one daemon without interfering.
+// This runs in the shell's own process during `prompto init`, where TERM and
+// the controlling terminal are the session's, and the result is baked into the
+// init script. Every later render in that session then passes the resolved
+// path back via --config, so console and non-console sessions can share one
+// daemon without interfering.
 func Resolve(configFile string) string {
 	if configFile == "" {
 		configFile = DefaultPath()
 	}
 
-	if !IsConsole(os.Getenv) {
+	if !IsConsole(os.Getenv, onConsoleDevice) {
 		return configFile
 	}
 

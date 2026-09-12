@@ -80,6 +80,12 @@ jobs:
       run: go list ./... | grep -v '/daemon/ipc$' | xargs go tool modernize
     - name: Unit Tests
       run: go test -count=1 -v ./...
+    # FreeBSD is a release target but has no runner here. goreleaser
+    # cross-compiles the non-test sources, so this is what typechecks the
+    # freebsd-tagged _test.go files, which goreleaser never builds.
+    - name: Vet FreeBSD
+      if: matrix.os == 'ubuntu-latest'
+      run: GOOS=freebsd GOARCH=amd64 go vet ./...
     - name: Race Tests
       run: go test -race -count=3 ./daemon/... ./log/... ./prompt/...
 
