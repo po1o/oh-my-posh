@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sync"
 	"time"
@@ -64,6 +65,22 @@ func newBinaryWatcher(binPath string, onChange func(), debounceWindow time.Durat
 		if err := bw.addTargetPath(resolved); err != nil {
 			_ = bw.Close()
 			return nil, err
+		}
+	}
+
+	// If the binary was invoked via its real path (e.g. Linux procfs), also try to
+	// discover any stable symlink entry in PATH (e.g. Homebrew bin) that resolves to it.
+	binName := filepath.Base(binPath)
+	if lookPath, err := exec.LookPath(binName); err == nil {
+		if resolvedLook, err := filepath.EvalSymlinks(lookPath); err == nil {
+			cleanResolvedLook := filepath.Clean(resolvedLook)
+			cleanTarget := filepath.Clean(binPath)
+			if resolved != "" {
+				cleanTarget = filepath.Clean(resolved)
+			}
+			if cleanResolvedLook == cleanTarget {
+				_ = bw.addTargetPath(lookPath)
+			}
 		}
 	}
 
@@ -154,7 +171,11 @@ func (bw *BinaryWatcher) eventLoop(onChange func(), debounceWindow time.Duration
 				continue
 			}
 
-			if !bw.targetPaths[filepath.Clean(eventPath)] {
+			cleanEventPath := filepath.Clean(eventPath)
+			isTarget := bw.targetPaths[cleanEventPath]
+			isWatchedDir := bw.watchedDirs[cleanEventPath] && event.Op&(fsnotify.Remove|fsnotify.Rename) != 0
+
+			if !isTarget && !isWatchedDir {
 				continue
 			}
 

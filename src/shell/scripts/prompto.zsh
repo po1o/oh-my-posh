@@ -153,7 +153,18 @@ function _prompto_cleanup() {
 _prompto_cleanup
 unset -f _prompto_cleanup
 
+function _prompto_ensure_executable() {
+  if [[ ! -x "$_prompto_executable" ]]; then
+    local _prompto_new_exe
+    _prompto_new_exe=$(whence -p prompto 2>/dev/null || which prompto 2>/dev/null || command -v prompto 2>/dev/null)
+    if [[ -n "$_prompto_new_exe" && -x "$_prompto_new_exe" ]]; then
+      _prompto_executable=$_prompto_new_exe
+    fi
+  fi
+}
+
 function _prompto_get_prompt() {
+  _prompto_ensure_executable
   local type=$1
   local args=("${@[2,-1]}")
   local vim_mode_arg=""
@@ -210,6 +221,7 @@ function _prompto_render_tooltip() {
     config_arg="--config=$_prompto_config"
   fi
 
+  _prompto_ensure_executable
   local tooltip=$($_prompto_executable tooltip \
     $config_arg \
     --shell=zsh \
@@ -340,6 +352,7 @@ _prompto_daemon_fd=
 _prompto_transient_prompt=
 _prompto_transient_rprompt=
 _prompto_transient_enabled=0
+_prompto_last_primary_prompt=
 
 # Vim mode variables
 _prompto_vim_mode=0
@@ -496,6 +509,8 @@ function _prompto_daemon_render() {
     vim_mode_arg="--vim-mode=$(_prompto_get_vim_mode)"
   fi
 
+  _prompto_ensure_executable
+
   local fd
   exec {fd}< <($_prompto_executable render \
     $config_arg \
@@ -528,6 +543,15 @@ function _prompto_daemon_render() {
     fi
   done
 
+  if [[ $batch_complete -eq 0 ]]; then
+    exec {fd}<&-
+    if [[ -n ${_prompto_last_primary_prompt-} ]]; then
+      PS1=$_prompto_last_primary_prompt
+      _prompto_reset_prompt_if_zle
+    fi
+    return
+  fi
+
   # Drain any immediately buffered lines before handing off to the async watcher.
   # Fast renders can emit the final completion batch right after the initial update batch,
   # and relying only on zle -F can miss that already-buffered completion.
@@ -557,6 +581,7 @@ function _prompto_daemon_parse_line() {
   case $type in
     primary)
       PS1=$text
+      _prompto_last_primary_prompt=$text
       ;;
     right)
       RPROMPT=$text

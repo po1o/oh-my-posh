@@ -140,3 +140,92 @@ func resultLines(output string) []string {
 
 	return results
 }
+
+func TestZshDaemonRenderRecoversFromDeletedExecutable(t *testing.T) {
+	if _, err := exec.LookPath("zsh"); err != nil {
+		t.Skip("zsh is not installed")
+	}
+
+	dir := t.TempDir()
+
+	binDir := filepath.Join(dir, "bin")
+	require.NoError(t, os.MkdirAll(binDir, 0o755))
+	newExecutable := filepath.Join(binDir, "prompto")
+	simpleRender := `#!/usr/bin/env zsh
+print "primary:HEALED"
+print "right:"
+print "status:complete"
+`
+	require.NoError(t, os.WriteFile(newExecutable, []byte(simpleRender), 0o700))
+
+	deletedExecutable := filepath.Join(dir, "deleted", "prompto")
+
+	script := filepath.Join(dir, "prompto.zsh")
+	integration := strings.NewReplacer(
+		"::PROMPTO::", "'"+deletedExecutable+"'",
+		"::CONFIG::", "''",
+	).Replace(zshInit)
+	require.NoError(t, os.WriteFile(script, []byte(integration), 0o600))
+
+	driverCode := `
+source ::SCRIPT::
+_prompto_daemon_render
+print "RESULT ps1=$PS1 exe=$_prompto_executable"
+`
+	driver := filepath.Join(dir, "driver.zsh")
+	body := strings.NewReplacer(
+		"::SCRIPT::", "'"+script+"'",
+	).Replace(driverCode)
+	require.NoError(t, os.WriteFile(driver, []byte(body), 0o600))
+
+	command := exec.CommandContext(t.Context(), "zsh", "-f", driver)
+	command.Env = append(os.Environ(), "PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	output, err := command.CombinedOutput()
+	require.NoError(t, err, "driver failed:\n%s", output)
+
+	results := resultLines(string(output))
+	require.Len(t, results, 1)
+	require.Contains(t, results[0], "ps1=HEALED")
+	require.Contains(t, results[0], "exe="+newExecutable)
+}
+
+func TestZshDaemonRenderRestoresPrimaryPromptOnRenderFailure(t *testing.T) {
+	if _, err := exec.LookPath("zsh"); err != nil {
+		t.Skip("zsh is not installed")
+	}
+
+	dir := t.TempDir()
+
+	deletedExecutable := filepath.Join(dir, "nonexistent", "prompto")
+
+	script := filepath.Join(dir, "prompto.zsh")
+	integration := strings.NewReplacer(
+		"::PROMPTO::", "'"+deletedExecutable+"'",
+		"::CONFIG::", "''",
+	).Replace(zshInit)
+	require.NoError(t, os.WriteFile(script, []byte(integration), 0o600))
+
+	driverCode := `
+source ::SCRIPT::
+_prompto_last_primary_prompt="FALLBACK_PROMPT"
+PS1="TRANSIENT_PROMPT"
+_prompto_daemon_render
+print "RESULT ps1=$PS1"
+`
+	driver := filepath.Join(dir, "driver.zsh")
+	body := strings.NewReplacer(
+		"::SCRIPT::", "'"+script+"'",
+	).Replace(driverCode)
+	require.NoError(t, os.WriteFile(driver, []byte(body), 0o600))
+
+	command := exec.CommandContext(t.Context(), "zsh", "-f", driver)
+	command.Env = []string{"PATH=/usr/empty_path_for_test"}
+
+	output, err := command.CombinedOutput()
+	require.NoError(t, err, "driver failed:\n%s", output)
+
+	results := resultLines(string(output))
+	require.Len(t, results, 1)
+	require.Contains(t, results[0], "ps1=FALLBACK_PROMPT")
+}
