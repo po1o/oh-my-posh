@@ -18,6 +18,12 @@ func startDetachedDaemon() error {
 		return fmt.Errorf("failed to get executable path: %w", err)
 	}
 
+	if lookPath, err := exec.LookPath("prompto"); err == nil {
+		if resolved, err := filepath.EvalSymlinks(lookPath); err == nil && filepath.Clean(resolved) == filepath.Clean(executable) {
+			executable = lookPath
+		}
+	}
+
 	// The detached process runs "daemon serve"
 	args := []string{"daemon", daemonSubcommandServe}
 	if configFlag != "" {

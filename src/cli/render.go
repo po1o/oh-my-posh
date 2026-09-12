@@ -186,6 +186,23 @@ func renderViaDaemon(flags *runtime.Flags, pid int, repaint bool) error {
 		outputPrompts(resp)
 		return resp.Type != "complete"
 	})
+	if err != nil && ctx.Err() == nil {
+		// If render failed while our context is still valid (e.g. stale/incompatible daemon,
+		// stream disconnect, protocol version mismatch), recycle the daemon and retry once.
+		_ = client.Close()
+		_ = daemon.KillDaemon()
+
+		restartedClient, startErr := daemon.ConnectOrStart(startDetachedDaemon)
+		if startErr != nil {
+			return err
+		}
+		defer restartedClient.Close()
+
+		err = restartedClient.RenderPrompt(ctx, flags, pid, "", clientEnvMap(), repaint, func(resp *ipc.PromptResponse) bool {
+			outputPrompts(resp)
+			return resp.Type != "complete"
+		})
+	}
 	if err != nil {
 		return err
 	}

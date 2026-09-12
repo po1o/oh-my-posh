@@ -41,7 +41,17 @@ function set_promptocontext
     return
 end
 
+function _prompto_ensure_executable
+    if not test -x "$_prompto_executable"
+        set --local _prompto_new_exe (command -s prompto 2>/dev/null)
+        if test -n "$_prompto_new_exe" -a -x "$_prompto_new_exe"
+            set --global _prompto_executable $_prompto_new_exe
+        end
+    end
+end
+
 function _prompto_get_prompt
+    _prompto_ensure_executable
     if test (count $argv) -eq 0
         return
     end
@@ -588,6 +598,7 @@ function _prompto_daemon_reader
         return
     end
 
+    _prompto_ensure_executable
     $_prompto_executable render \
         $config_arg \
         --shell=fish \

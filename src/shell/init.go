@@ -3,6 +3,8 @@ package shell
 import (
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -31,7 +33,70 @@ func getExecutablePath(env runtime.Environment) (string, error) {
 		return path.Base(executable), nil
 	}
 
-	return executable, nil
+	return stableExecutablePath(executable), nil
+}
+
+func stableExecutablePath(executable string) string {
+	if len(executable) == 0 {
+		return executable
+	}
+
+	cleanExe := filepath.Clean(executable)
+
+	// If invoked via an explicit path (e.g. /opt/homebrew/bin/prompto), check if
+	// that path is a symlink resolving to executable.
+	if len(os.Args) > 0 && os.Args[0] != "" {
+		argPath := os.Args[0]
+		if filepath.IsAbs(argPath) || strings.ContainsRune(argPath, filepath.Separator) {
+			if absArg, err := filepath.Abs(argPath); err == nil {
+				cleanArg := filepath.Clean(absArg)
+				if cleanArg != cleanExe {
+					if target, err := filepath.EvalSymlinks(cleanArg); err == nil && filepath.Clean(target) == cleanExe {
+						return cleanArg
+					}
+				}
+			}
+		}
+	}
+
+	// If invoked as a command name (e.g. "prompto") or if executable is inside a
+	// package-manager cellar/store, search PATH for a stable entrypoint pointing to it.
+	binNames := []string{"prompto"}
+	if len(os.Args) > 0 && os.Args[0] != "" && !strings.ContainsRune(os.Args[0], filepath.Separator) {
+		binNames = append([]string{os.Args[0]}, binNames...)
+	}
+	baseName := filepath.Base(cleanExe)
+	if baseName != "prompto" {
+		binNames = append(binNames, baseName)
+	}
+
+	for _, name := range binNames {
+		lookPath, err := exec.LookPath(name)
+		if err != nil {
+			continue
+		}
+
+		absLook, err := filepath.Abs(lookPath)
+		if err != nil {
+			continue
+		}
+
+		cleanLook := filepath.Clean(absLook)
+		if cleanLook == cleanExe {
+			continue
+		}
+
+		target, err := filepath.EvalSymlinks(cleanLook)
+		if err != nil {
+			continue
+		}
+
+		if filepath.Clean(target) == cleanExe {
+			return cleanLook
+		}
+	}
+
+	return cleanExe
 }
 
 // Init returns the command to initialize prompto for the shell.

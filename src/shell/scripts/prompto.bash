@@ -42,7 +42,18 @@ PS0='${_prompto_start_time:0:$((_prompto_start_time="$(_prompto_start_timer)",0)
 
 _prompto_secondary_prompt='> '
 
+function _prompto_ensure_executable() {
+    if [[ ! -x "$_prompto_executable" ]]; then
+        local _prompto_new_exe
+        _prompto_new_exe=$(type -P prompto 2>/dev/null || command -v prompto 2>/dev/null)
+        if [[ -n "$_prompto_new_exe" && -x "$_prompto_new_exe" ]]; then
+            _prompto_executable=$_prompto_new_exe
+        fi
+    fi
+}
+
 function _prompto_render_type() {
+    _prompto_ensure_executable
     local prompt_type="$1"
     shift
 
@@ -404,6 +415,7 @@ function _prompto_daemon_render() {
     # or an unpacked archive — would execute on every prompt.
     #
     # %q quotes each value for exactly this round trip.
+    _prompto_ensure_executable
     local render_command
     printf -v render_command '%q ' "$_prompto_executable" "${render_args[@]}"
 
